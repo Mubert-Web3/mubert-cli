@@ -1,0 +1,15 @@
+{
+  "entity_kind": "Track",
+  "authority_id": 0,
+  "metadata_standard": "M25",
+  "flags": [
+    "Immutable"
+  ],
+  "off_chain_metadata": {
+    "title": "example",
+    "bpm": 120,
+    "key": 1,
+    "scale": 0,
+    "instrument": 1
+  }
+}

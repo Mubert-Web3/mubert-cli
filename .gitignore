@@ -1,0 +1,5 @@
+target/
+.github
+.idea
+.zed
+.ignored

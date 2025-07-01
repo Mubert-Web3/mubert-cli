@@ -1,0 +1,27 @@
+[package]
+name = "mubert-cli"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5", features = ["default", "derive"] }
+serde = { version = "1", features = ["default", "derive"] }
+serde_json = { version = "1", features = ["default"] }
+subxt = { version = "0.42", features = ["default"] }
+subxt-signer = { version = "0.42", features = ["default"] }
+tokio = {  version = "1.45", features = ["rt", "macros"] }
+reqwest = {  version = "0.12", features = ["json", "default"] }
+tokio-retry = {  version = "0.3" }
+
+[features]
+default = ["std"]
+std = [
+    "clap/std",
+    "serde/std",
+    "serde_json/std",
+    "subxt-signer/std"
+]
+
+[[bin]]
+name = "mubert-cli"
+path = "src/main.rs"
