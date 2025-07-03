@@ -33,15 +33,15 @@ pub async fn create_authority(
         .map_err(|e| format!("chain rpc api: {e}"))?;
 
     // make transaction and wait for event
-    let events = api
+    let tx_progress = api
         .tx()
         .sign_and_submit_then_watch_default(&call, &sender_keypair)
         .await
-        .map_err(|e| format!("can not submit tx: {e}"))?
-        .wait_for_finalized_success()
-        .await
+        .map_err(|e| format!("can not submit tx: {e}"))?;
+    let finalized = tx_progress.wait_for_finalized().await?;
+    let events = finalized.fetch_events().await
         .map_err(|e| format!("tx submitted, but not validated: {e}"))?;
-
+    
     // check events
     if let Some(event) = events
         .find_first::<ip_onchain_runtime::ip_onchain::events::AuthorityAdded>()
