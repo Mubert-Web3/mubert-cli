@@ -13,6 +13,7 @@ use std::error::Error;
 use std::path::PathBuf;
 use subxt::utils::AccountId32;
 use subxt::{OnlineClient, PolkadotConfig};
+use subxt::tx::TxStatus;
 use subxt_signer::bip39::Mnemonic;
 use subxt_signer::sr25519::{dev, Keypair};
 use tokio_retry::strategy::FixedInterval;
@@ -143,7 +144,52 @@ pub async fn update_ip(
         None,
         None,
     );
+    
+    println!("Submitting transaction...");
+    let mut progress = api
+        .tx()
+        .sign_and_submit_then_watch_default(&call, &sender_keypair)
+        .await
+        .map_err(|e| format!("can not submit tx: {e}"))?;
+    
+    println!("Waiting for inclusion...");
+    let mut entity_added: Option<ip_onchain_runtime::ip_onchain::events::EntityAdded> = None;
+    while let Some(status) = progress.next().await {
+        match status.map_err(|e| format!("tx progress error: {e}"))? {
+            TxStatus::InBestBlock(in_block) => {
+                println!("✅ Included in block {:?}", in_block.block_hash());
+    
+                let events = in_block
+                    .fetch_events()
+                    .await
+                    .map_err(|e| format!("can not fetch events: {e}"))?;
+    
+                if let Some(event) = events
+                    .find_first::<ip_onchain_runtime::ip_onchain::events::EntityAdded>()
+                    .map_err(|e| format!("decode error: {e}"))?
+                {
+                    println!("🎉 Entity added successful: {:?}", event);
+                    entity_added = Some(event);
+                    break;
+                }
+            }
+            TxStatus::InFinalizedBlock(finalized) => {
+                println!("Finalized in block {:?}", finalized.block_hash());
+            }
+            TxStatus::Invalid { message } => {
+                eprintln!("⚠️ Tx marked invalid afterwards: {message}");
+                if entity_added.is_some() {
+                    break;
+                }
+            }
+            other => {
+                println!("Status: {:?}", other);
+            }
+        }
+    }
 
+    let entity_added = entity_added.ok_or("tx submitted but EntityAdded event not found")?;
+    /*
     println!("Submitting transaction...");
     let tx_progress = api
         .tx()
@@ -170,6 +216,8 @@ pub async fn update_ip(
     {
         println!("Entity added successful: {:?}", event);
     }
+    
+     */
     Ok(())
 }
 
@@ -186,6 +234,7 @@ async fn upload_metadata_to_arweave(
         .arweave()
         .create_task(arweave_worker_address.clone(), BoundedVec::from(data));
 
+    /*
     println!("Submitting transaction...");
     let submited = api
         .tx()
@@ -205,21 +254,59 @@ async fn upload_metadata_to_arweave(
         .await
         .map_err(|e| format!("tx submitted, but not can not fetch events: {e}"))?;
     
-    let task_id = match events
-        .find_first::<ip_onchain_runtime::arweave::events::TaskAdded>()
-        .map_err(|e| format!("tx submitted, but event not found: {e}"))?
-    {
-        Some(e) => {
-            println!("Task added successful: task_id={:?}", e.task_id);
-            e.task_id
-        }
-        None => return Err("unexpected event".into()),
-    };
+    
+     */
+    println!("Submitting transaction...");
+    let mut progress = api
+        .tx()
+        .sign_and_submit_then_watch_default(&call, sender_keypair)
+        .await
+        .map_err(|e| format!("can not submit tx: {e}"))?;
+    
+    println!("Waiting for inclusion...");
+    let mut task_id_opt = None;
 
+    while let Some(status) = progress.next().await {
+        match status.map_err(|e| format!("tx progress error: {e}"))? {
+            TxStatus::InBestBlock(in_block) => {
+                println!("Included in block {:?}", in_block.block_hash());
+                let events = in_block.fetch_events().await
+                    .map_err(|e| format!("can not fetch events: {e}"))?;
+                if let Some(ev) = events.find_first::<ip_onchain_runtime::arweave::events::TaskAdded>()
+                    .map_err(|e| format!("decode error: {e}"))? 
+                {
+                    println!("Task added successful: task_id={:?}", ev.task_id);
+                    task_id_opt = Some(ev.task_id);
+                }
+            }
+            TxStatus::InFinalizedBlock(finalized) => {
+                println!("Finalized in block {:?}", finalized.block_hash());
+                let events = finalized.fetch_events().await
+                    .map_err(|e| format!("can not fetch events: {e}"))?;
+                if let Some(ev) = events.find_first::<ip_onchain_runtime::arweave::events::TaskAdded>()
+                    .map_err(|e| format!("decode error: {e}"))? 
+                {
+                    println!("Task added successful: task_id={:?}", ev.task_id);
+                    task_id_opt = Some(ev.task_id);
+                }
+                break;
+            }
+            TxStatus::Invalid { message } => {
+                eprintln!("⚠️ Tx marked invalid afterwards: {message}");
+                if task_id_opt.is_some() {
+                    break;
+                }
+            }
+            other => {
+                println!("Status: {:?}", other);
+            }
+        }
+    }
+    
+    let task_id = task_id_opt.ok_or("TaskAdded event not found")?;
     let tasks_query = ip_onchain_runtime::storage().arweave().tasks(task_id);
 
     println!("Waiting for worker done task: may take a 5 min to validate");
-
     let result = Retry::spawn(FixedInterval::from_millis(6_000), || async {
         println!("Get task state: task_id={}", task_id);
 
@@ -236,7 +323,7 @@ async fn upload_metadata_to_arweave(
 
         println!("state: {:?}", tasks_details.state);
         if tasks_details.state != TaskState::Validate {
-            println!("retry");
+            println!("waiting for the validate state");
             return Err("task not in validate state, waiting");
         };
 
