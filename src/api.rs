@@ -42,13 +42,17 @@ pub async fn wait_for_fingerprint_url(
     Retry::spawn(FixedInterval::from_millis(timeout_secs * 1000), || async {
         match check_fingerprint_status(task_id, auth_token).await {
             Ok(result) => {
+                println!("{result:?}");
                 if result.status == "done" {
                     Ok(result.url)
                 } else {
                     Err("fingerprint not ready".into())
                 }
             }
-            Err(e) => Err(e),
+            Err(e) => {
+                println!("{e:?}");
+                Err(e)
+            }
         }
     })
     .await
