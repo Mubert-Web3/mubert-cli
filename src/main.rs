@@ -1,6 +1,8 @@
 use clap::{CommandFactory, Parser, Subcommand};
 use mubert_cli::ip_onchain_runtime::ip_onchain::calls::types::create_authority;
 
+use subxt::utils::AccountId32;
+
 #[derive(Parser)]
 #[command(
     name = "mubert-cli",
@@ -30,6 +32,8 @@ enum Commands {
         data_file: Option<std::path::PathBuf>,
         #[arg(short = 's', long)]
         secret_key_file: Option<std::path::PathBuf>,
+        #[arg(long)]
+        arweave_worker_address: Option<AccountId32>,
     },
     CreateAuthority {
         #[arg(short = 'n', long)]
@@ -53,6 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 data,
                 data_file,
                 secret_key_file,
+                arweave_worker_address,
             }) => {
                 mubert_cli::update_ip::update_ip(
                     &cli.node_url,
@@ -61,6 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     data,
                     data_file,
                     secret_key_file,
+                    arweave_worker_address,
                 )
                 .await?;
             }

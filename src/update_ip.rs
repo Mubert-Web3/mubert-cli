@@ -1,7 +1,9 @@
+use crate::api::MetadataRequest;
 use crate::ip_onchain_runtime::ip_onchain::calls::types::create_entity::{
     MetadataFeatures, MetadataStandard,
 };
 use crate::ip_onchain_runtime::runtime_types::bounded_collections::bounded_vec::BoundedVec;
+use crate::ip_onchain_runtime::runtime_types::pallet_arweave::types::TaskState;
 use crate::ip_onchain_runtime::runtime_types::pallet_ip_onchain::types::{
     BitFlags, IPEntityKind, MetadataFeature, Wallet,
 };
@@ -11,8 +13,11 @@ use std::error::Error;
 use std::path::PathBuf;
 use subxt::utils::AccountId32;
 use subxt::{OnlineClient, PolkadotConfig};
+use subxt::tx::TxStatus;
 use subxt_signer::bip39::Mnemonic;
 use subxt_signer::sr25519::{dev, Keypair};
+use tokio_retry::strategy::FixedInterval;
+use tokio_retry::Retry;
 
 #[derive(Serialize, Deserialize)]
 struct CreateEntityFields {
@@ -44,6 +49,7 @@ pub async fn update_ip(
     data: &Option<String>,
     data_file: &Option<PathBuf>,
     secret_key_file: &Option<PathBuf>,
+    arweave_worker_address: &Option<AccountId32>,
 ) -> Result<(), Box<dyn Error>> {
     // parsing a arguments
     let data = match (data, data_file) {
@@ -75,6 +81,11 @@ pub async fn update_ip(
         sender_keypair = Keypair::from_phrase(&mnemonic, None).unwrap();
     }
 
+    // get rpc api client
+    let api = OnlineClient::<PolkadotConfig>::from_url(node_url)
+        .await
+        .map_err(|e| format!("chain rpc api: {e}"))?;
+
     let metadata_url = match req.metadata_url {
         Some(off_chain_metadata_url) => off_chain_metadata_url,
         None => {
@@ -89,26 +100,37 @@ pub async fn update_ip(
                 .map_err(|e| format!("wait_for_fingerprint_url: {e}"))?;
             println!("fingerprint: {fingerprint}");
 
-            let off_chain_metadata = api::create_metadata(
-                api::MetadataRequest {
-                    title: req.off_chain_metadata.title,
-                    bpm: req.off_chain_metadata.bpm,
-                    key: req.off_chain_metadata.key,
-                    scale: req.off_chain_metadata.scale,
-                    instrument: req.off_chain_metadata.instrument,
-                    fingerprint,
-                },
-                api_auth,
-            )
-            .await
-            .map_err(|e| format!("create_metadata: {e}"))?;
-            println!("off chain metadata url: {}", off_chain_metadata.url);
+            let metadata_req = api::MetadataRequest {
+                title: req.off_chain_metadata.title,
+                bpm: req.off_chain_metadata.bpm,
+                key: req.off_chain_metadata.key,
+                scale: req.off_chain_metadata.scale,
+                instrument: req.off_chain_metadata.instrument,
+                fingerprint,
+            };
 
-            off_chain_metadata.url
+            if let Some(arweave_worker_address) = arweave_worker_address {
+                let metadata_url = upload_metadata_to_arweave(
+                    &mut sender_keypair,
+                    &api,
+                    &metadata_req,
+                    arweave_worker_address,
+                )
+                .await?;
+                println!("Done! Arweave metadata url: {}", metadata_url);
+
+                metadata_url
+            } else {
+                let off_chain_metadata = api::create_metadata(metadata_req, api_auth)
+                    .await
+                    .map_err(|e| format!("create_metadata: {e}"))?;
+                println!("off chain metadata url: {}", off_chain_metadata.url);
+
+                off_chain_metadata.url
+            }
         }
     };
 
-    // prepare chain request
     let call = ip_onchain_runtime::tx().ip_onchain().create_entity(
         req.entity_kind,
         req.authority_id,
@@ -118,23 +140,75 @@ pub async fn update_ip(
         req.authors_ids,
         req.royalty_parts,
         req.related_entities_ids,
+        None,
+        None,
+        None,
     );
-
-    // get rpc api client
-    let api = OnlineClient::<PolkadotConfig>::from_url(node_url)
+    
+    println!("Submitting transaction...");
+    let mut progress = api
+        .tx()
+        .sign_and_submit_then_watch_default(&call, &sender_keypair)
         .await
-        .map_err(|e| format!("chain rpc api: {e}"))?;
+        .map_err(|e| format!("can not submit tx: {e}"))?;
+    
+    println!("Waiting for inclusion...");
+    let mut entity_added: Option<ip_onchain_runtime::ip_onchain::events::EntityAdded> = None;
+    while let Some(status) = progress.next().await {
+        match status.map_err(|e| format!("tx progress error: {e}"))? {
+            TxStatus::InBestBlock(in_block) => {
+                println!("✅ Included in block {:?}", in_block.block_hash());
+    
+                let events = in_block
+                    .fetch_events()
+                    .await
+                    .map_err(|e| format!("can not fetch events: {e}"))?;
+    
+                if let Some(event) = events
+                    .find_first::<ip_onchain_runtime::ip_onchain::events::EntityAdded>()
+                    .map_err(|e| format!("decode error: {e}"))?
+                {
+                    println!("🎉 Entity added successful: {:?}", event);
+                    entity_added = Some(event);
+                    break;
+                }
+            }
+            TxStatus::InFinalizedBlock(finalized) => {
+                println!("Finalized in block {:?}", finalized.block_hash());
+            }
+            TxStatus::Invalid { message } => {
+                eprintln!("⚠️ Tx marked invalid afterwards: {message}");
+                if entity_added.is_some() {
+                    break;
+                }
+            }
+            other => {
+                println!("Status: {:?}", other);
+            }
+        }
+    }
 
-    // make transaction and wait for event
+    let entity_added = entity_added.ok_or("tx submitted but EntityAdded event not found")?;
+    /*
+    println!("Submitting transaction...");
     let tx_progress = api
         .tx()
         .sign_and_submit_then_watch_default(&call, &sender_keypair)
         .await
         .map_err(|e| format!("can not submit tx: {e}"))?;
-    let finalized = tx_progress.wait_for_finalized().await?;
-    let events = finalized.fetch_events().await
-        .map_err(|e| format!("tx submitted, but not validated: {e}"))?;
     
+    println!("wait finalization...");
+    let finalized = tx_progress
+        .wait_for_finalized()
+        .await
+        .map_err(|e| format!("can not finalize tx: {e}"))?;
+    
+    println!("wait events...");
+    let events = finalized
+        .fetch_events()
+        .await
+        .map_err(|e| format!("tx submitted, but not can not fetch events: {e}"))?;
+
     // check events
     if let Some(event) = events
         .find_first::<ip_onchain_runtime::ip_onchain::events::EntityAdded>()
@@ -142,5 +216,129 @@ pub async fn update_ip(
     {
         println!("Entity added successful: {:?}", event);
     }
+    
+     */
     Ok(())
+}
+
+async fn upload_metadata_to_arweave(
+    sender_keypair: &mut Keypair,
+    api: &OnlineClient<PolkadotConfig>,
+    metadata_req: &MetadataRequest,
+    arweave_worker_address: &AccountId32,
+) -> Result<String, Box<dyn Error>> {
+    println!("Starting arweave metadata upload");
+
+    let data = serde_json::to_string(&metadata_req).unwrap();
+    let call = ip_onchain_runtime::tx()
+        .arweave()
+        .create_task(arweave_worker_address.clone(), BoundedVec::from(data));
+
+    /*
+    println!("Submitting transaction...");
+    let submited = api
+        .tx()
+        .sign_and_submit_then_watch_default(&call, sender_keypair)
+        .await
+        .map_err(|e| format!("can not submit tx: {e}"))?;
+
+    println!("wait finalization...");
+    let finalized = submited
+        .wait_for_finalized()
+        .await
+        .map_err(|e| format!("tx submitted, but not finalized: {e}"))?;
+
+    println!("wait events...");
+    let events = finalized
+        .fetch_events()
+        .await
+        .map_err(|e| format!("tx submitted, but not can not fetch events: {e}"))?;
+    
+    
+     */
+    println!("Submitting transaction...");
+    let mut progress = api
+        .tx()
+        .sign_and_submit_then_watch_default(&call, sender_keypair)
+        .await
+        .map_err(|e| format!("can not submit tx: {e}"))?;
+    
+    println!("Waiting for inclusion...");
+    let mut task_id_opt = None;
+
+    while let Some(status) = progress.next().await {
+        match status.map_err(|e| format!("tx progress error: {e}"))? {
+            TxStatus::InBestBlock(in_block) => {
+                println!("Included in block {:?}", in_block.block_hash());
+                let events = in_block.fetch_events().await
+                    .map_err(|e| format!("can not fetch events: {e}"))?;
+                if let Some(ev) = events.find_first::<ip_onchain_runtime::arweave::events::TaskAdded>()
+                    .map_err(|e| format!("decode error: {e}"))? 
+                {
+                    println!("Task added successful: task_id={:?}", ev.task_id);
+                    task_id_opt = Some(ev.task_id);
+                }
+            }
+            TxStatus::InFinalizedBlock(finalized) => {
+                println!("Finalized in block {:?}", finalized.block_hash());
+                let events = finalized.fetch_events().await
+                    .map_err(|e| format!("can not fetch events: {e}"))?;
+                if let Some(ev) = events.find_first::<ip_onchain_runtime::arweave::events::TaskAdded>()
+                    .map_err(|e| format!("decode error: {e}"))? 
+                {
+                    println!("Task added successful: task_id={:?}", ev.task_id);
+                    task_id_opt = Some(ev.task_id);
+                }
+                break;
+            }
+            TxStatus::Invalid { message } => {
+                eprintln!("⚠️ Tx marked invalid afterwards: {message}");
+                if task_id_opt.is_some() {
+                    break;
+                }
+            }
+            other => {
+                println!("Status: {:?}", other);
+            }
+        }
+    }
+    
+    let task_id = task_id_opt.ok_or("TaskAdded event not found")?;
+    let tasks_query = ip_onchain_runtime::storage().arweave().tasks(task_id);
+
+    println!("Waiting for worker done task: may take a 5 min to validate");
+    let result = Retry::spawn(FixedInterval::from_millis(6_000), || async {
+        println!("Get task state: task_id={}", task_id);
+
+        let tasks_details = api
+            .storage()
+            .at_latest()
+            .await
+            .unwrap()
+            .fetch(&tasks_query)
+            .await
+            .unwrap()
+            .ok_or("no task")
+            .unwrap();
+
+        println!("state: {:?}", tasks_details.state);
+        if tasks_details.state != TaskState::Validate {
+            println!("waiting for the validate state");
+            return Err("task not in validate state, waiting");
+        };
+
+        if let Some(tx_hash) = tasks_details.tx_hash {
+            let metadata_url = format!(
+                "https://arweave.net/{}",
+                String::from_utf8(tx_hash.0).unwrap()
+            );
+
+            return Ok(metadata_url);
+        };
+
+        Err("task in unexpected state")
+    })
+    .await;
+
+    Ok(result.expect("can not get tx_hash from task"))
 }

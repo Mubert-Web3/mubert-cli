@@ -10,10 +10,6 @@ pub mod update_ip;
         derive = "serde::Deserialize, serde::Serialize"
     ),
     derive_for_type(
-        path = "pallet_ip_onchain::types::BitFlags",
-        derive = "serde::Deserialize, serde::Serialize"
-    ),
-    derive_for_type(
         path = "pallet_ip_onchain::types::IPEntityKind",
         derive = "serde::Deserialize, serde::Serialize"
     ),
@@ -25,6 +21,11 @@ pub mod update_ip;
         path = "pallet_ip_onchain::types::Wallet",
         derive = "serde::Deserialize, serde::Serialize"
     ),
+    derive_for_type(
+        path = "sp_core::crypto::AccountId32",
+        derive = "serde::Deserialize, serde::Serialize"
+    ),
+    derive_for_type(path = "pallet_arweave::types::TaskState", derive = "PartialEq"),
     derive_for_type(
         path = "pallet_ip_onchain::types::AuthorityKind",
         derive = "clap::ValueEnum"

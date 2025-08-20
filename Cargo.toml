@@ -1,6 +1,6 @@
 [package]
 name = "mubert-cli"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 
 [dependencies]
@@ -9,7 +9,7 @@ serde = { version = "1", features = ["default", "derive"] }
 serde_json = { version = "1", features = ["default"] }
 subxt = { version = "0.42", features = ["default"] }
 subxt-signer = { version = "0.42", features = ["default"] }
-tokio = {  version = "1.45", features = ["rt", "macros"] }
+tokio = {  version = "1.45", features = ["rt", "macros","rt-multi-thread"] }
 reqwest = {  version = "0.12", features = ["json", "default"] }
 tokio-retry = {  version = "0.3" }
 

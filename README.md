@@ -55,6 +55,15 @@ mubert-cli upload-ip \
 --secret-key-file=./test_secret_key.json
 ```
 
+## upload-ip with uploading metadata to arweave
+```bash
+mubert-cli upload-ip \
+--api-auth='YOUR-BEARER-TOKEN' \
+--file=./music.wav \
+--data-file=./examples/create_entity.json \
+--arweave-worker-address='worker-address-who-can-upload-file-to-arweave'
+```
+
 ## Update pallet api metadata
 
 ```bash
