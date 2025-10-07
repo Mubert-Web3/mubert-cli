@@ -1,6 +1,6 @@
-use std::error::Error;
 use crate::ip_onchain_runtime::ip_onchain::calls::types::create_authority;
 use crate::{ip_onchain_runtime, SecretKeyFile};
+use std::error::Error;
 
 use std::path::PathBuf;
 use subxt::{OnlineClient, PolkadotConfig};
