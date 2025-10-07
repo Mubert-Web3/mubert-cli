@@ -150,13 +150,13 @@ pub async fn update_ip(
         .sign_and_submit_then_watch_default(&call, &sender_keypair)
         .await
         .map_err(|e| format!("can not submit tx: {e}"))?;
-    
+
     println!("wait finalization...");
     let finalized = tx_progress
         .wait_for_finalized()
         .await
         .map_err(|e| format!("can not finalize tx: {e}"))?;
-    
+
     println!("wait events...");
     let events = finalized
         .fetch_events()
@@ -182,9 +182,12 @@ async fn upload_metadata_to_arweave(
     println!("Starting arweave metadata upload");
 
     let data = serde_json::to_string(&metadata_req).unwrap();
-    let call = ip_onchain_runtime::tx()
-        .arweave()
-        .create_task(arweave_worker_address.clone(), BoundedVec::from(data));
+    let call = ip_onchain_runtime::tx().arweave().create_task(
+        arweave_worker_address.clone(),
+        BoundedVec::from(data),
+        1000000u128,
+        1000u128,
+    );
 
     println!("Submitting transaction...");
     let submited = api
@@ -204,7 +207,7 @@ async fn upload_metadata_to_arweave(
         .fetch_events()
         .await
         .map_err(|e| format!("tx submitted, but not can not fetch events: {e}"))?;
-    
+
     let task_id = match events
         .find_first::<ip_onchain_runtime::arweave::events::TaskAdded>()
         .map_err(|e| format!("tx submitted, but event not found: {e}"))?
@@ -254,4 +257,28 @@ async fn upload_metadata_to_arweave(
     .await;
 
     Ok(result.expect("can not get tx_hash from task"))
+}
+
+pub async fn get_entity(node_url: &String, entity_id: u32) -> Result<(), Box<dyn Error>> {
+    let api = OnlineClient::<PolkadotConfig>::from_url(node_url)
+        .await
+        .map_err(|e| format!("chain rpc api: {e}"))?;
+
+    let query = ip_onchain_runtime::storage()
+        .ip_onchain()
+        .entities(entity_id);
+
+    let details = api
+        .storage()
+        .at_latest()
+        .await?
+        .fetch(&query)
+        .await?
+        .ok_or("entity not found")?;
+
+    let data = serde_json::to_string(&details).unwrap();
+
+    println!("{data}");
+
+    Ok(())
 }

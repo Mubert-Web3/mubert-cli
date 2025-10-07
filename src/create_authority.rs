@@ -1,3 +1,4 @@
+use std::error::Error;
 use crate::ip_onchain_runtime::ip_onchain::calls::types::create_authority;
 use crate::{ip_onchain_runtime, SecretKeyFile};
 
@@ -58,5 +59,29 @@ pub async fn create_authority(
     {
         println!("Authority added successful: {:?}", event);
     }
+    Ok(())
+}
+
+pub async fn get_authority(node_url: &String, authority_id: u32) -> Result<(), Box<dyn Error>> {
+    let api = OnlineClient::<PolkadotConfig>::from_url(node_url)
+        .await
+        .map_err(|e| format!("chain rpc api: {e}"))?;
+
+    let query = ip_onchain_runtime::storage()
+        .ip_onchain()
+        .authorities(authority_id);
+
+    let details = api
+        .storage()
+        .at_latest()
+        .await?
+        .fetch(&query)
+        .await?
+        .ok_or("authority not found")?;
+
+    let data = serde_json::to_string(&details).unwrap();
+
+    println!("{data}");
+
     Ok(())
 }
