@@ -67,5 +67,61 @@ mubert-cli upload-ip \
 ## Update pallet api metadata
 
 ```bash
-subxt metadata --pallets IPOnchain --url ws://127.0.0.1:34299 > ip_onchain_metadata.scale
+subxt metadata --pallets IPOnchain --url ws://127.0.0.1:9944 > ip_onchain_metadata.scale
+```
+
+## Move entity to your parachain
+
+### Prerequisites
+
+Your chain is on  ws://127.0.0.1:9945 id=4725
+Chain with entity ws://127.0.0.1:9944 id=4724
+
+* create authority on your chain
+```bash
+mubert-cli --node-url=ws://127.0.0.1:9945 create-authority --name=test --kind=musician
+```
+
+* create authority and entity on other chain
+```bash
+mubert-cli --node-url=ws://127.0.0.1:9944 create-authority --name=test --kind=musician
+```
+```bash
+mubert-cli --node-url=ws://127.0.0.1:9944 upload-ip --api-auth='not-needed' --file=./music.wav --data-file=./examples/create_entity_no_upload.json
+```
+
+### Transfer
+
+Make a request for you entity, foreign_authority_id authority id on you chain to which the entity will be transferred
+```bash
+mubert-cli --node-url=ws://127.0.0.1:9945 foreign-request --data='{"foreign_authority_id":0,"foreign_authority_name":"foreign_authority","entity_id":0}' --src-parachain-id=4725 --dst-parachain-id=4724
+```
+
+See a request
+```bash
+mubert-cli --node-url=ws://127.0.0.1:9944 get-foreign-request --request-id=0 | jq
+```
+See foreign authority
+```bash
+mubert-cli --node-url=ws://127.0.0.1:9944 get-authority --authority-id=1 | jq
+```
+
+On other chain authority must approve you request
+```bash
+mubert-cli --node-url=ws://127.0.0.1:9944 foreign-request-approve --entity-id=0 --request-id=0 
+```
+
+After this, you can move the entity to your chain
+```bash
+mubert-cli --node-url=ws://127.0.0.1:9945 foreign-request-take --request-id=0 --dst-parachain-id=4724
+```
+
+See a done request
+```bash
+mubert-cli --node-url=ws://127.0.0.1:9944 get-foreign-request --request-id=0 | jq
+```
+
+See a new entity
+```bash
+mubert-cli --node-url=ws://127.0.0.1:9945 get-entity --entity-id=0 | jq 
 ```

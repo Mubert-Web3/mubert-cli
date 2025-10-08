@@ -1,10 +1,59 @@
 pub mod api;
 pub mod create_authority;
+pub mod foreign_request;
 pub mod update_ip;
 
 #[subxt::subxt(
     runtime_metadata_path = "ip_onchain_metadata.scale",
     derive_for_all_types = "Clone",
+    derive_for_type(
+        path = "pallet_ip_onchain::types::AuthorityDetails",
+        derive = "serde::Deserialize, serde::Serialize"
+    ),
+    derive_for_type(
+        path = "pallet_ip_onchain::types::AuthorityKind",
+        derive = "serde::Deserialize, serde::Serialize"
+    ),
+    derive_for_type(
+        path = "pallet_ip_onchain::types::EntityDetails",
+        derive = "serde::Deserialize, serde::Serialize"
+    ),
+    derive_for_type(
+        path = "pallet_ip_onchain::types::BitFlags",
+        derive = "serde::Deserialize, serde::Serialize"
+    ),
+    derive_for_type(
+        path = "pallet_ip_onchain::types::Metadata",
+        derive = "serde::Deserialize, serde::Serialize"
+    ),
+    derive_for_type(
+        path = "staging_xcm::v5::location::Location",
+        derive = "serde::Deserialize, serde::Serialize"
+    ),
+    derive_for_type(
+        path = "xcm::v3::junction::BodyPart",
+        derive = "serde::Deserialize, serde::Serialize"
+    ),
+    derive_for_type(
+        path = "xcm::v3::junction::BodyId",
+        derive = "serde::Deserialize, serde::Serialize"
+    ),
+    derive_for_type(
+        path = "staging_xcm::v5::junctions::Junctions",
+        derive = "serde::Deserialize, serde::Serialize"
+    ),
+    derive_for_type(
+        path = "staging_xcm::v5::junction::Junction",
+        derive = "serde::Deserialize, serde::Serialize"
+    ),
+    derive_for_type(
+        path = "staging_xcm::v5::junction::NetworkId",
+        derive = "serde::Deserialize, serde::Serialize"
+    ),
+    derive_for_type(
+        path = "pallet_ip_onchain::xcm::ForeignInfo",
+        derive = "serde::Deserialize, serde::Serialize"
+    ),
     derive_for_type(
         path = "bounded_collections::bounded_vec::BoundedVec",
         derive = "serde::Deserialize, serde::Serialize"
